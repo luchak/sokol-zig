@@ -274,7 +274,7 @@ pub fn buildLibSokol(b: *Build, options: LibSokolOptions) !*Build.Step.Compile {
         "sokol_glue.c",
         "sokol_fetch.c",
     };
-    if (!options.target.result.isWasm()) {
+    if (true or !options.target.result.isWasm()) {
         inline for (csources) |csrc| {
             lib.addCSourceFile(.{
                 .file = b.path(csrc_root ++ csrc),
@@ -291,18 +291,13 @@ pub fn buildLibSokol(b: *Build, options: LibSokolOptions) !*Build.Step.Compile {
             });
         }
     } else {
-        const wasm_cflags = &.{
-            "-DIMPL",
-            backend_cflags,
-            "-fwasm-exceptions",
-        };
         inline for (csources) |csrc| {
             const compile = emCompileStep(
                 b,
                 b.path(csrc_root ++ csrc),
                 options.optimize,
                 options.emsdk.?,
-                wasm_cflags,
+                cflags,
             );
             lib.addObjectFile(compile);
         }
@@ -315,7 +310,7 @@ pub fn buildLibSokol(b: *Build, options: LibSokolOptions) !*Build.Step.Compile {
                 b.path(csrc_root ++ "sokol_imgui.c"),
                 options.optimize,
                 options.emsdk.?,
-                wasm_cflags,
+                cflags,
             );
             lib.addObjectFile(compile);
         }
