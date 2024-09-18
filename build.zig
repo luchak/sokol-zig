@@ -274,22 +274,80 @@ pub fn buildLibSokol(b: *Build, options: LibSokolOptions) !*Build.Step.Compile {
         "sokol_glue.c",
         "sokol_fetch.c",
     };
-    inline for (csources) |csrc| {
-        lib.addCSourceFile(.{
-            .file = b.path(csrc_root ++ csrc),
-            .flags = cflags,
-        });
-    }
+    if (!options.target.result.isWasm()) {
+        inline for (csources) |csrc| {
+            lib.addCSourceFile(.{
+                .file = b.path(csrc_root ++ csrc),
+                .flags = cflags,
+            });
+        }
 
-    // optional Dear ImGui support, the called is required to also
-    // add the cimgui include path to the returned compile step
-    if (options.with_sokol_imgui) {
-        lib.addCSourceFile(.{
-            .file = b.path(csrc_root ++ "sokol_imgui.c"),
-            .flags = cflags,
-        });
+        // optional Dear ImGui support, the called is required to also
+        // add the cimgui include path to the returned compile step
+        if (options.with_sokol_imgui) {
+            lib.addCSourceFile(.{
+                .file = b.path(csrc_root ++ "sokol_imgui.c"),
+                .flags = cflags,
+            });
+        }
+    } else {
+        const wasm_cflags = &.{
+            "-DIMPL",
+            backend_cflags,
+            "-fwasm-exceptions",
+        };
+        inline for (csources) |csrc| {
+            const compile = emCompileStep(
+                b,
+                b.path(csrc_root ++ csrc),
+                options.optimize,
+                options.emsdk.?,
+                wasm_cflags,
+            );
+            lib.addObjectFile(compile);
+        }
+
+        // optional Dear ImGui support, the called is required to also
+        // add the cimgui include path to the returned compile step
+        if (options.with_sokol_imgui) {
+            const compile = emCompileStep(
+                b,
+                b.path(csrc_root ++ "sokol_imgui.c"),
+                options.optimize,
+                options.emsdk.?,
+                wasm_cflags,
+            );
+            lib.addObjectFile(compile);
+        }
     }
     return lib;
+}
+
+pub fn emCompileStep(b: *Build, filename: Build.LazyPath, optimize: OptimizeMode, emsdk: *Build.Dependency, extra_flags: []const []const u8) Build.LazyPath {
+    const emcc_path = emSdkLazyPath(b, emsdk, &.{ "upstream", "emscripten", "emcc" }).getPath(b);
+    const emcc = b.addSystemCommand(&.{emcc_path});
+    emcc.setName("emcc"); // hide emcc path
+    emcc.addArg("-c");
+    if (optimize == .ReleaseSmall) {
+        emcc.addArg("-Oz");
+    } else if (optimize == .ReleaseFast or optimize == .ReleaseSafe) {
+        emcc.addArg("-O3");
+    }
+    emcc.addFileArg(filename);
+    for (extra_flags) |flag| {
+        emcc.addArg(flag);
+    }
+    emcc.addArg("-o");
+
+    const output_name = switch (filename) {
+        .dependency => filename.dependency.sub_path,
+        .src_path => filename.src_path.sub_path,
+        .cwd_relative => filename.cwd_relative,
+        .generated => filename.generated.sub_path,
+    };
+
+    const output = emcc.addOutputFileArg(b.fmt("{s}.o", .{output_name}));
+    return output;
 }
 
 // for wasm32-emscripten, need to run the Emscripten linker from the Emscripten SDK
